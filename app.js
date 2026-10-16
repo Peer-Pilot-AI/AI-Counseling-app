@@ -1,3 +1,4 @@
+
 const today = new Date();
 const TERMS_VERSION = "2026-09-27";
 const PRIVACY_VERSION = "2026-09-27";

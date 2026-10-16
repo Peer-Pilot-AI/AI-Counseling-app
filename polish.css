@@ -1,0 +1,77 @@
+/* PeerPilot AI — cohesive finishing layer. Loaded after the legacy styles. */
+:root {
+  --pp-accent: #6488ff;
+  --pp-accent-strong: #4772f5;
+  --pp-surface: #0b1736;
+  --pp-border: rgba(141, 164, 220, .16);
+  --pp-focus: rgba(100, 136, 255, .42);
+}
+
+html { scroll-behavior: smooth; }
+body { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 3px solid var(--pp-focus);
+  outline-offset: 2px;
+}
+
+/* Consistent interactions */
+.nav-item, .btn, .chip, .filter-tab, .text-link, .pw-row, .pw-card,
+.panel, .stat-card, .college-card, .activity-card, .resource-card {
+  transition: background-color .18s ease, border-color .18s ease, box-shadow .18s ease,
+    transform .18s ease, color .18s ease;
+}
+.btn-primary { background: linear-gradient(135deg, #4772f5, #6b7cff); }
+.btn-primary:hover { box-shadow: 0 10px 28px rgba(71, 114, 245, .26); transform: translateY(-1px); }
+.btn:active, .nav-item:active { transform: translateY(0); }
+.panel, .stat-card, .card, .college-card, .activity-card, .resource-card {
+  border-color: var(--pp-border);
+  border-radius: 16px;
+}
+.panel:hover, .stat-card:hover, .college-card:hover, .activity-card:hover, .resource-card:hover {
+  border-color: rgba(120, 151, 255, .28);
+}
+
+/* More intentional dashboard hierarchy */
+.page-container { max-width: 1540px; }
+.pw-hello h1 { letter-spacing: -.045em; line-height: 1.14; }
+.pw-hello p, .page-subtitle { line-height: 1.65; }
+.pw-banner { border: 1px solid rgba(119, 151, 255, .2); }
+.pw-stats { gap: 14px; }
+.pw-stat { border-radius: 15px; }
+.pw-panel { border-radius: 16px; }
+.pw-head h2 { letter-spacing: -.02em; }
+.pw-row { border-radius: 11px; }
+.pw-row:hover { background: rgba(255,255,255,.035); }
+.pw-card { border-radius: 13px; }
+.pw-card:hover { transform: translateY(-2px); border-color: rgba(119,151,255,.3); }
+.pw-ai { background: linear-gradient(145deg, rgba(45,107,255,.12), rgba(139,92,246,.07)), var(--pw-card); }
+
+/* Auth screen: more confident, less crowded */
+.pwa-shell { min-height: 100svh; }
+.pwa-hero h1 { letter-spacing: -.055em; line-height: 1.03; }
+.pwa-hero > p { max-width: 470px; line-height: 1.75; }
+.pwa-card { border: 1px solid var(--pp-border); border-radius: 22px; box-shadow: 0 24px 80px rgba(0,0,0,.2); }
+.pwa-input { border-radius: 12px; }
+.pwa-go { border-radius: 12px; }
+.pwa-feats li { border-color: rgba(141,164,220,.16); }
+
+/* Forms and empty states */
+.text-input, .select-input, .textarea-input, .search-input, .chat-input-row input {
+  border-radius: 11px;
+}
+.empty-state { border-radius: 14px; line-height: 1.65; }
+.toast { box-shadow: 0 12px 36px rgba(0,0,0,.28); }
+
+@media (max-width: 760px) {
+  .page-container { padding-left: 16px; padding-right: 16px; }
+  .pw-hello h1 { font-size: clamp(25px, 7vw, 34px); }
+  .pw-stats { gap: 10px; }
+  .pw-panel, .panel { border-radius: 14px; }
+  .pwa-shell { min-height: 100svh; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}

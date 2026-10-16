@@ -1,0 +1,1 @@
+"""PeerPilot AI agent core: the model client, the tool loop, the tool list, and per-student memory."""

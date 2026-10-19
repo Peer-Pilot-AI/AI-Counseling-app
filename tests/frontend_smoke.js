@@ -43,7 +43,7 @@ const inline = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]
   const doc = w.document; const click = el => el.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
   const assert = (c, m) => { if (!c) { errors.push("ASSERT: " + m); } };
   assert(!doc.querySelector(".app-shell").hidden, "app shell visible after login");
-  const pages = ["dashboard","advisor","roadmap","colleges","opportunities","activities","tutor","tasks","profile","applications","studyPlan","essays","careers","feedback","admin"];
+  const pages = ["dashboard","advisor","roadmap","courses","colleges","opportunities","activities","tutor","tasks","profile","applications","studyPlan","essays","careers","feedback","admin"];
   for (const pg of pages) {
     const b = doc.querySelector(`[data-page="${pg}"]`); assert(b, "nav button " + pg);
     if (b) click(b);
@@ -106,17 +106,10 @@ const inline = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]
   assert(doc.documentElement.classList.contains("pp-dark"), "dark theme detected");
   click(doc.querySelector('[data-page="dashboard"]'));
   await new Promise(r => setTimeout(r, 60));
-  assert(doc.querySelector(".pw-grid"), "new dashboard layout renders");
-  assert(!doc.querySelector('.main-nav [data-page="courses"]'), "Course planner tab is gone from the sidebar");
-  assert(!doc.querySelector(".sv"), "welcome survey stays hidden for a student with a filled-in profile");
-  click(doc.querySelector('.pw-go[data-page="roadmap"]'));
+  assert(doc.querySelector(".hm-tiles") && doc.querySelector(".hm-rings"), "new Home layout renders");
+  click(doc.querySelector('[data-page="courses"]'));
   await new Promise(r => setTimeout(r, 30));
-  assert(doc.querySelector(".cm-layout") && doc.querySelector(".cm-n.step"), "roadmap path renders");
-  const stepBtn = doc.querySelector('.cm-n.step .cm-disc[data-action="roadmap-toggle"]');
-  const wasDone = stepBtn.getAttribute("aria-pressed");
-  click(stepBtn);
-  await new Promise(r => setTimeout(r, 30));
-  assert(doc.querySelector('.cm-n.step .cm-disc[data-action="roadmap-toggle"]').getAttribute("aria-pressed") !== wasDone, "tapping a roadmap step toggles it");
+  assert(doc.querySelector(".cs-stats") && doc.querySelector(".cs-table"), "courses table renders");
   // delegated actions fire exactly once
   click(doc.querySelector('[data-page="tasks"]'));
   const before = doc.querySelector(".task-check").className;

@@ -38,6 +38,7 @@ STATIC_FILES = {
     "privacy.html",
     "assets/logo.png",
     "peerpilot.js",
+    "pathway.js",
 }
 STATIC_CACHE: dict[str, tuple] = {}
 CATALOG_LOCK = threading.Lock()
@@ -68,16 +69,63 @@ BLANK_PROFILE = {
 }
 
 
-def load_env() -> None:
-    path = ROOT / ".env"
-    if not path.is_file():
-        return
-    for row in path.read_text(encoding="utf-8").splitlines():
+BUILD = "agent build 2026-10-16"  # shown at start-up and in /api/health so you can tell which files are running
+
+
+def load_env() -> dict:
+    """Read .env into os.environ. Forgiving about common Windows mix-ups:
+    a file saved as .env.txt, a hidden byte-order mark, UTF-16 text, spaces around =,
+    'export KEY=...', quotes, trailing comments, and an empty KEY= already set on the computer.
+    Returns {"path": the file used or None, "note": a hint or ""}."""
+    info = {"path": None, "note": ""}
+    path = next((p for p in (ROOT / ".env", ROOT / ".env.txt") if p.is_file()), None)
+    if path is None:
+        return info
+    raw = path.read_bytes()
+    text = raw.decode("utf-16", errors="replace") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8-sig", errors="replace")
+    info["path"] = path
+    if path.name != ".env":
+        info["note"] = f"I read {path.name}, but please rename it to exactly .env (Windows may be hiding the .txt)."
+    for row in text.splitlines():
         row = row.strip()
         if not row or row.startswith("#") or "=" not in row:
             continue
+        if row.lower().startswith("export "):
+            row = row[7:].lstrip()
         key, value = row.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        key, value = key.strip(), value.strip()
+        if value[:1] in {'"', "'"}:
+            end = value.find(value[0], 1)
+            value = value[1:end] if end > 0 else value[1:]
+        else:
+            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+        if key and value and not os.environ.get(key):  # a real value already set on the computer wins
+            os.environ[key] = value
+    return info
+
+
+def report_ai_status(info: dict) -> None:
+    """Print, in plain words, whether the AI key was found (never the key itself)."""
+    print(f"Folder: {ROOT}")
+    if info["path"]:
+        print(f"Settings file: {info['path']}")
+        if info["note"]:
+            print(f"  NOTE: {info['note']}")
+    else:
+        print(f"Settings file: NOT FOUND. Make a file named exactly .env in the folder above (copy .env.example).")
+    key = assistant._api_key()
+    if not key:
+        print("AI key: NOT FOUND. Add a line like GEMINI_API_KEY=your-key to .env, save, and restart.")
+        return
+    print(f"AI key: found (ends with ...{key[-4:]})")
+    if re.search(r"\s|your-key|paste", key, re.I):
+        print("  WARNING: that key looks wrong (spaces or placeholder text). Paste only the key itself.")
+
+    def check():
+        ok, message = assistant.check_key()
+        print(("AI check: OK. " if ok else "AI check: PROBLEM. ") + message)
+
+    threading.Thread(target=check, daemon=True).start()
 
 
 def utcnow() -> str:
@@ -193,6 +241,7 @@ def safe_profile(value) -> dict:
             "volunteer",
             "work",
             "internships",
+            
         }:
             if isinstance(raw, list):
                 result[key] = raw[:100]
@@ -354,6 +403,7 @@ class Handler(BaseHTTPRequestHandler):
                     {
                         "ok": True,
                         "ai_configured": assistant.configured(),
+                        "build": BUILD,
                         "model": assistant.model_name(),
                         "reasoning_effort": os.environ.get("GEMINI_THINKING_LEVEL", "high"),
                     },
@@ -1452,7 +1502,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    load_env()
+    env_info = load_env()
     database.DB_PATH = Path(
         os.environ.get("APP_DATABASE", database.ROOT / "student_guidance.sqlite3")
     ).resolve()
@@ -1464,10 +1514,8 @@ def main() -> None:
     port = int(os.environ.get("APP_PORT", "8000"))
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
-    print(f"PeerPilot AI at http://{host}:{port}")
-    print(
-        f"AI: {'configured (Gemini)' if assistant.configured() else 'local planner mode (set GEMINI_API_KEY to enable AI/research)'}"
-    )
+    print(f"PeerPilot AI ({BUILD}) at http://{host}:{port}")
+    report_ai_status(env_info)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

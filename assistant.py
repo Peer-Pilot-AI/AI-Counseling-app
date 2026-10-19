@@ -83,7 +83,7 @@ _registry: ToolRegistry | None = None
 
 
 def _api_key() -> str:
-    return (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+    return (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip().strip("\"'")
 
 
 def _models() -> list[str]:
@@ -233,9 +233,34 @@ def _friendly(exc: LLMError) -> RuntimeError:
     return RuntimeError("The AI couldn't answer right now. Please try again in a moment.")
 
 
+def check_key() -> tuple[bool, str]:
+    """Ask Google which models this key can use. Used once at start-up to explain problems in plain words."""
+    if not configured():
+        return False, "No key was found."
+    try:
+        names = get_llm().list_models()
+    except Exception as exc:  # noqa: BLE001 - any failure is reported, never raised
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in {400, 401, 403}:
+            return False, "Google rejected the key. Make a new one at https://aistudio.google.com/apikey and paste it into .env."
+        return False, f"Couldn't reach Google to check the key ({exc.__class__.__name__}). Check your internet connection."
+    wanted = _models()
+    usable = [m for m in wanted if m in names]
+    if usable:
+        return True, f"Key works. Using: {', '.join(usable)}."
+    ideas = [n for n in names if n.startswith("gemini") and "flash" in n
+             and not any(x in n for x in ("image", "tts", "live", "audio", "embedding", "robotics"))][:6]
+    return False, (f"Key works, but none of the model names in GEMINI_MODELS ({', '.join(wanted)}) were offered to it. "
+                   f"Try one of these in .env, like GEMINI_MODELS={ideas[0] if ideas else 'a name from the list'}: "
+                   + (", ".join(ideas) or "(none returned)"))
+
+
 def answer(payload: dict, profile: dict, mode: str = "advisor", user_id: int | None = None) -> dict:
     if not configured():
-        raise RuntimeError("AI service is not configured. Add GEMINI_API_KEY to .env and restart the app.")
+        raise RuntimeError(
+            "AI service is not set up yet. In the folder with app.py, make a file named exactly .env "
+            "(not .env.txt), put GEMINI_API_KEY=your-key in it, save, and restart the app."
+        )
     message = payload.get("message", "")
     if not isinstance(message, str) or not message.strip() or len(message) > 8_000:
         raise ValueError("Enter a question under 8,000 characters.")

@@ -136,6 +136,79 @@ class AssistantTests(unittest.TestCase):
             self.assertIn(words, str(ctx.exception).lower())
 
 
+class EnvFileTests(unittest.TestCase):
+    """The .env reader must forgive the usual Windows mix-ups."""
+
+    def load(self, name, raw, preset=None):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / name).write_bytes(raw)
+            env = {"GEMINI_API_KEY": preset} if preset is not None else {}
+            with patch.object(app, "ROOT", Path(tmp)), patch.dict(os.environ, env, clear=False):
+                if preset is None:
+                    os.environ.pop("GEMINI_API_KEY", None)
+                info = app.load_env()
+                return os.environ.get("GEMINI_API_KEY"), info
+
+    def test_plain_file(self):
+        self.assertEqual(self.load(".env", b"GEMINI_API_KEY=abc123\n")[0], "abc123")
+
+    def test_windows_line_endings_spaces_quotes_and_comments(self):
+        raw = b'# note\r\nGEMINI_API_KEY = "abc123"  \r\nAPP_PORT=1\r\n'
+        self.assertEqual(self.load(".env", raw)[0], "abc123")
+        self.assertEqual(self.load(".env", b"GEMINI_API_KEY=abc123   # my key\n")[0], "abc123")
+        self.assertEqual(self.load(".env", b"export GEMINI_API_KEY=abc123\n")[0], "abc123")
+
+    def test_hidden_byte_order_mark_and_utf16(self):
+        self.assertEqual(self.load(".env", b"\xef\xbb\xbfGEMINI_API_KEY=abc123\n")[0], "abc123")
+        self.assertEqual(self.load(".env", "GEMINI_API_KEY=abc123\n".encode("utf-16"))[0], "abc123")
+
+    def test_dot_env_dot_txt_is_used_with_a_hint(self):
+        key, info = self.load(".env.txt", b"GEMINI_API_KEY=abc123\n")
+        self.assertEqual(key, "abc123")
+        self.assertIn("rename", info["note"])
+
+    def test_an_empty_setting_on_the_computer_does_not_block_the_file(self):
+        self.assertEqual(self.load(".env", b"GEMINI_API_KEY=abc123\n", preset="")[0], "abc123")
+
+    def test_a_real_setting_on_the_computer_wins(self):
+        self.assertEqual(self.load(".env", b"GEMINI_API_KEY=abc123\n", preset="from-computer")[0], "from-computer")
+
+    def test_missing_file_is_fine(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(app, "ROOT", Path(tmp)):
+            self.assertIsNone(app.load_env()["path"])
+
+    def test_the_key_check_explains_problems_in_plain_words(self):
+        class Fake:
+            def __init__(self, names=None, error=None):
+                self.names, self.error = names, error
+
+            def list_models(self):
+                if self.error:
+                    raise self.error
+                return self.names
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "k", "GEMINI_MODELS": "gemini-x"}):
+            with patch.object(assistant, "get_llm", return_value=Fake(["gemini-x"])):
+                self.assertTrue(assistant.check_key()[0])
+            with patch.object(assistant, "get_llm", return_value=Fake(["gemini-9-flash", "gemini-9-flash-image"])):
+                ok, msg = assistant.check_key()
+                self.assertFalse(ok)
+                self.assertIn("GEMINI_MODELS=gemini-9-flash", msg)
+                self.assertNotIn("image", msg)
+            bad = Exception("401")
+            bad.response = type("R", (), {"status_code": 403})()
+            with patch.object(assistant, "get_llm", return_value=Fake(error=bad)):
+                self.assertIn("rejected", assistant.check_key()[1])
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "", "GOOGLE_API_KEY": ""}):
+            self.assertEqual(assistant.check_key(), (False, "No key was found."))
+
+
 class ApiIsolationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -327,7 +400,8 @@ class ApiIsolationTests(unittest.TestCase):
                 "POST", "/api/assistant/chat", {"message": "What are Yale's current deadlines?"}, cookie
             )
         self.assertEqual(status, 503)
-        self.assertIn("not configured", data["error"].lower())
+        self.assertIn("not set up yet", data["error"].lower())
+        self.assertIn(".env", data["error"])
 
     def test_tutor_call_does_not_overwrite_advisor_chat(self):
         cookie = self.register("chat-user@example.edu")

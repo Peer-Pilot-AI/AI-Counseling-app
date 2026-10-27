@@ -429,7 +429,7 @@
     };
     return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Course and goals progress over time">${grid}${xl}${line("c", "c1")}${line("g", "c2")}</svg>`;
   }
-  const YEAR_DESC = { 9: "Build a strong foundation and explore your interests.", 10: "Explore majors and gain real-world experience.", 11: "Narrow your focus and build your resume.", 12: "Apply, get accepted, and plan for your future." };
+  
   const YEAR_ICON = [["cap", "y1"], ["doc", "y2"], ["user", "y3"], ["star", "y4"]];
 
   dashboardPage = function () {
@@ -462,19 +462,19 @@
 
     const ranges = [[30, "1M"], [90, "3M"], [180, "6M"], [365, "1Y"]];
     const chart = `<section class="dash-card dash-chart"><div class="dash-head"><h2><span class="dash-h-ico">${I.route}</span>Your Progress</h2><div class="dash-range" role="group" aria-label="Time range">${ranges.map(([d, l]) => `<button data-prog-range="${d}" aria-pressed="${progRange === d}">${l}</button>`).join("")}</div></div>
-      <div class="dash-chart-body"><div class="dash-svg">${chartSvg(hist)}</div><div class="dash-note"><strong><i></i>${coursePct || roadPct ? "You're on track!" : "Let's get started"}</strong><p>${nCourses ? `You've completed ${coursePct}% of your courses and ${roadPct}% of your roadmap milestones.` : `Add your courses and check off roadmap steps to see your progress here.`}</p><div class="dash-keep"><span>${I.target}</span><div><b>Keep going!</b><small>Small steps create big results.</small></div></div></div></div>
-      <div class="dash-legend"><span><i class="c1"></i>Course Progress</span><span><i class="c2"></i>Goals Progress</span>${hist.length < 2 ? '<small>History builds up as you use the app.</small>' : ""}</div></section>`;
+      <div class="dash-chart-body"><div class="dash-svg">${chartSvg(hist)}</div><div class="dash-note"><strong><i></i>${coursePct || roadPct ? "You're on track!" : "Let's get started"}</strong><p>${nCourses ? `You've completed ${coursePct}% of your courses and ${roadPct}% of your roadmap milestones.` : `Add your courses and check off roadmap steps to see your progress here.`}</p></div></div>
+      <div class="dash-legend"><span><i class="c1"></i>Course Progress</span><span><i class="c2"></i>Goals Progress</span></div></section>`;
 
     const road = `<section class="dash-card dash-road"><div class="dash-head"><h2><span class="dash-h-ico">${I.cap}</span>College Roadmap</h2><a href="#roadmap" data-page="roadmap">View Full Roadmap ${I.chev}</a></div><div class="dash-years">${pr.years
       .map((y, k) => {
         const [ic, c] = YEAR_ICON[k];
         const two = y.items.slice(0, 2).map((t, i) => { const d = pr.done.includes(`${y.grade}-${i}`); return `<li class="${d ? "done" : ""}"><span>${d ? I.check : ""}</span>${esc(t)}</li>`; }).join("");
-        return `<div class="dash-year"><span class="dash-node ${c}">${I[ic]}</span><b>${y.name}</b><p>${YEAR_DESC[y.grade]}</p><ul>${two}</ul></div>`;
+        return `<div class="dash-year"><span class="dash-node ${c}">${I[ic]}</span><b>${y.name}</b><ul>${two}</ul></div>`;
       })
       .join("")}</div></section>`;
 
     const prompts = [["sparkles", "Help me choose the best colleges for my major"], ["book", "Create a study plan for my upcoming exams"], ["target", "Suggest scholarships I might be eligible for"], ["brief", "Explore career options based on my interests"]];
-    const ai = `<aside class="dash-card dash-ai"><div class="dash-ai-head"><span class="dash-bot">${I.sparkles}</span><h2>AI Study &amp; Planning Assistant</h2><em>Powered by AI</em></div><p>Get personalized advice, plan your next steps, and stay on track — all in one place.</p>${prompts.map(([ic, t]) => `<button class="dash-prompt" data-ai-prompt="${esc(t)}"><span>${I[ic]}</span>${t}<i>${I.chev}</i></button>`).join("")}<button class="dash-ask" data-page="advisor">${I.sparkles} Ask AI</button></aside>`;
+    const ai = `<aside class="dash-card dash-ai"><div class="dash-ai-head"><span class="dash-bot">${I.sparkles}</span><h2>AI Study &amp; Planning Assistant</h2><em>Powered by AI</em></div>${prompts.map(([ic, t]) => `<button class="dash-prompt" data-ai-prompt="${esc(t)}"><span>${I[ic]}</span>${t}<i>${I.chev}</i></button>`).join("")}<button class="dash-ask" data-page="advisor">${I.sparkles} Ask AI</button></aside>`;
 
     return `<div class="dash">
       <div class="dash-title"><h1>Welcome back, ${esc(p.firstName || "there")}</h1><p>Your next step starts here.${svFresh(p) ? ' <button class="text-link" data-pp-survey>Take the 2-minute welcome survey</button>' : ""}</p></div>

@@ -10,6 +10,8 @@
    4. Welcome survey (first sign-in)
 */
 (function () {
+  if (window.__pathwayLoaded) return; /* guards against this file being loaded or pasted twice */
+  window.__pathwayLoaded = true;
   /* If the page body was pasted twice, keep only the first copy of the app shell. */
   document.querySelectorAll(".app-shell").forEach((el, i) => i && el.remove());
   ["modalBackdrop", "toast"].forEach((id) => document.querySelectorAll("#" + id).forEach((el, i) => i && el.remove()));
@@ -51,6 +53,10 @@
     flask: svg('<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7.5 15h9"/>'),
     pen: svg('<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
     cal: svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>'),
+    dollar: svg('<circle cx="12" cy="12" r="9"/><path d="M14.5 9.2a2.6 2.1 0 0 0-2.5-1.4c-1.4 0-2.5.8-2.5 2s1.1 1.6 2.5 2 2.5.8 2.5 2-1.1 2-2.5 2a2.6 2.1 0 0 1-2.5-1.4M12 6v1.8M12 16.2V18"/>'),
+    sliders: svg('<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>'),
+    bell: svg('<path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 7 2.5 7h-17S6 15 6 9z"/><path d="M10 20a2 2 0 0 0 4 0"/>'),
+    chev: svg('<path d="m9 6 6 6-6 6"/>'),
     chevron: svg('<path d="m6 9 6 6 6-6"/>'),
   };
 
@@ -69,8 +75,39 @@
   const systemTheme = () =>
     window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 
+  const pref = (k) => { try { return localStorage.getItem("peerpilot-pref-" + k) !== "off"; } catch (e) { return true; } };
+  const ACCENTS = { blue: "#3d78ff", purple: "#8b5cf6", teal: "#14b8a6", pink: "#ef4f7b", orange: "#f59e0b" };
+  function applyAccent(name) {
+    const r = document.documentElement.style;
+    const keys = ["--primary", "--primary-2", "--primary-hover", "--primary-soft", "--primary-text"];
+    if (!ACCENTS[name] || name === "blue") keys.forEach((k) => r.removeProperty(k));
+    else {
+      const c = ACCENTS[name];
+      const dark = document.documentElement.dataset.theme === "dark";
+      r.setProperty("--primary", c);
+      r.setProperty("--primary-2", `color-mix(in srgb, ${c} 80%, white)`);
+      r.setProperty("--primary-hover", `color-mix(in srgb, ${c} 85%, black)`);
+      r.setProperty("--primary-soft", `color-mix(in srgb, ${c} ${dark ? 18 : 13}%, transparent)`);
+      r.setProperty("--primary-text", dark ? `color-mix(in srgb, ${c} 55%, white)` : `color-mix(in srgb, ${c} 78%, black)`);
+    }
+    document.querySelectorAll("[data-accent]").forEach((b) => b.setAttribute("aria-pressed", String((name || "blue") === b.dataset.accent)));
+  }
+  const readAccent = () => { try { return localStorage.getItem("peerpilot-accent") || "blue"; } catch (e) { return "blue"; } };
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("[data-accent]");
+    if (a) { try { localStorage.setItem("peerpilot-accent", a.dataset.accent); } catch (x) {} applyAccent(a.dataset.accent); }
+    const p = e.target.closest("[data-pref]");
+    if (p) { const on = pref(p.dataset.pref); try { localStorage.setItem("peerpilot-pref-" + p.dataset.pref, on ? "off" : "on"); } catch (x) {} render(); }
+  });
+  const MODE_KEY = "peerpilot-theme-mode";
+  const readMode = () => { try { return localStorage.getItem(MODE_KEY); } catch (e) { return null; } };
+  function syncThemeButtons() {
+    const mode = readMode() === "system" ? "system" : document.documentElement.dataset.theme;
+    document.querySelectorAll("[data-theme-choice]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themeChoice === mode)));
+  }
   applyTheme = function (theme, announce) {
-    const t = theme === "light" ? "light" : "dark";
+    const sys = theme === "system";
+    const t = sys ? systemTheme() : theme === "light" ? "light" : "dark";
     const root = document.documentElement;
     root.dataset.theme = t;
     root.style.colorScheme = t;
@@ -80,15 +117,16 @@
     if (meta) meta.setAttribute("content", t === "dark" ? "#070d22" : "#f4f7ff");
     try {
       localStorage.setItem(THEME_KEY, t);
+      localStorage.setItem(MODE_KEY, sys ? "system" : "fixed");
     } catch (e) {}
-    document.querySelectorAll("[data-theme-choice]").forEach((b) => {
-      b.setAttribute("aria-pressed", String(b.dataset.themeChoice === t));
-    });
+    syncThemeButtons();
+    applyAccent(readAccent());
     const toggle = document.getElementById("themeToggle");
     if (toggle) toggle.setAttribute("aria-label", t === "dark" ? "Switch to light mode" : "Switch to dark mode");
-    if (announce) toast(`${t === "light" ? "Light" : "Dark"} mode on`);
+    if (announce) toast(sys ? "Following your device" : `${t === "light" ? "Light" : "Dark"} mode on`);
   };
-  applyTheme(readTheme() || systemTheme());
+  if (window.matchMedia)
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => readMode() === "system" && applyTheme("system"));
 
   document.addEventListener("click", (e) => {
     if (e.target.closest("[data-theme-toggle]")) {
@@ -100,32 +138,36 @@
      3. SIDEBAR: 10 tabs max. Related pages share a tab and show sub-tabs.
      ================================================================ */
   const TABS = [
-    { id: "dashboard", label: "Overview", icon: "home", pages: ["dashboard"] },
-    { id: "roadmap", label: "Roadmap", icon: "route", pages: ["roadmap"] },
-    { id: "coach", label: "AI Coach", icon: "sparkles", pages: ["advisor", "tutor", "studyPlan", "essays"] },
-    { id: "colleges", label: "Colleges", icon: "cap", pages: ["colleges", "applications"] },
-    { id: "careers", label: "Careers", icon: "compass", pages: ["careers"] },
-    { id: "opps", label: "Opportunities", icon: "trophy", pages: ["opportunities", "deadlines"], extra: '<span class="count warn" id="ppDeadlineCount" style="display:none">0</span>' },
+    { id: "dashboard", label: "Dashboard", icon: "home", pages: ["dashboard", "advisor", "calendar", "tasks"], extra: '<span class="count" id="taskCount">0</span>' },
+    { id: "roadmap", label: "My Roadmap", icon: "route", pages: ["roadmap"] },
+    { id: "courses", label: "Courses", icon: "book", pages: ["courses", "tutor", "studyPlan"] },
+    { id: "goals", label: "Goals", icon: "target", pages: ["goals"] },
     { id: "activities", label: "Activities", icon: "star", pages: ["activities"] },
-    { id: "mentors", label: "Mentors", icon: "users", pages: ["mentors"] },
-    { id: "tasks", label: "Tasks", icon: "tasks", pages: ["tasks"], extra: '<span class="count" id="taskCount">0</span>' },
-    { id: "me", label: "Profile", icon: "user", pages: ["profile", "memory", "feedback", "admin"] },
+    { id: "planning", label: "College Planning", icon: "cap", pages: ["colleges", "resources"] },
+    { id: "scholarships", label: "Scholarships", icon: "dollar", pages: ["deadlines"], extra: '<span class="count warn" id="ppDeadlineCount" style="display:none">0</span>' },
+    { id: "applications", label: "Applications", icon: "doc", pages: ["applications", "essays"] },
+    { id: "career", label: "Career", icon: "brief", pages: ["careers", "opportunities", "mentors"] },
+    { id: "me", label: "Settings", icon: "sliders", pages: ["profile", "memory", "feedback", "admin"] },
   ];
   const LABELS = {
     dashboard: "Overview",
+    goals: "Goals",
+    courses: "Courses",
+    activities: "Activities",
     roadmap: "My roadmap",
-    advisor: "AI advisor",
+    colleges: "College list",
+    opportunities: "Internships",
+    careers: "Career explorer",
+    applications: "Applications",
+    calendar: "Calendar",
+    tasks: "Tasks",
+    resources: "Resources",
+    deadlines: "Dates & scholarships",
+    mentors: "Peer mentors",
+    advisor: "AI Assistant",
     tutor: "Study tutor",
     studyPlan: "Study planner",
     essays: "Essay feedback",
-    colleges: "College list",
-    applications: "Applications",
-    careers: "Career explorer",
-    opportunities: "Opportunities",
-    deadlines: "Dates & scholarships",
-    activities: "Activities",
-    mentors: "Peer mentors",
-    tasks: "Tasks & deadlines",
     profile: "My profile",
     memory: "What AI remembers",
     feedback: "Report a problem",
@@ -135,6 +177,12 @@
   function buildNav() {
     const navEl = document.getElementById("mainNav");
     if (!navEl) return;
+    const bt = document.querySelector(".brand-text b");
+    if (bt && !bt.querySelector("span")) bt.innerHTML = "PeerPilot <span>AI</span>";
+    const foot = document.querySelector(".sidebar-foot");
+    if (foot && !document.querySelector(".side-tag")) foot.insertAdjacentHTML("beforebegin", '<div class="side-tag"><i></i>Plan today.<br>Build tomorrow.</div>');
+    const tr = document.querySelector(".topbar-right");
+    if (tr && !document.getElementById("bellBtn")) tr.insertAdjacentHTML("afterbegin", `<button class="icon-btn bell" id="bellBtn" data-page="calendar" aria-label="Upcoming deadlines">${I.bell}<i hidden></i></button>`);
     const tasksCount = document.getElementById("taskCount");
     const keep = tasksCount ? tasksCount.textContent : "0";
     navEl.innerHTML = TABS.map(
@@ -146,10 +194,7 @@
   }
   function bindChrome() {
     const out = document.getElementById("logoutButton");
-    if (out && !out.dataset.bound) {
-      out.dataset.bound = "1";
-      out.addEventListener("click", () => logout());
-    }
+    if (out) out.remove(); /* Sign out lives only in Settings */
     const scrim = document.getElementById("scrim");
     if (scrim && !scrim.dataset.bound) {
       scrim.dataset.bound = "1";
@@ -160,6 +205,9 @@
     const s = document.getElementById("sidebar");
     if (s) s.classList.remove("open");
   }
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("[data-signout]")) logout();
+  });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeDrawer();
   });
@@ -183,6 +231,10 @@
   }
   function decorate() {
     const tab = TABS.find((t) => t.pages.includes(activePage)) || TABS[0];
+    syncThemeButtons();
+    const dot = document.querySelector("#bellBtn i");
+    if (dot) dot.hidden = !calEvents().some((e) => e.d >= ymd(new Date()) && e.d <= ymd(new Date(Date.now() + 7 * 864e5)));
+    if (activePage === "opportunities") applyOppFilter();
     document.querySelectorAll("#mainNav .nav-item").forEach((b) => {
       const on = b.dataset.tab === tab.id;
       b.classList.toggle("active", on);
@@ -193,8 +245,12 @@
     if (crumb) crumb.textContent = LABELS[activePage] || tab.label;
     document.title = `${LABELS[activePage] || tab.label} · PeerPilot AI`;
     const root = document.getElementById("pageContainer");
+    document.querySelectorAll(".hub-tabs").forEach((el) => el.remove());
     const bar = hubBar();
     if (root && bar) root.insertAdjacentHTML("afterbegin", bar);
+    const hu = root && root.querySelector(":scope > .pp-heads-up");
+    const ttl = root && root.querySelector(".dash-title");
+    if (hu && ttl) ttl.after(hu);
   }
 
   /* ================================================================
@@ -340,106 +396,102 @@
   /* ================================================================
      6. DASHBOARD
      ================================================================ */
+  /* progress history: one snapshot per day, kept in this browser, so the chart only shows real data */
+  let progRange = 30;
+  function recordProgress(c, g) {
+    const key = "peerpilot-progress:" + ((currentUser && (currentUser.email || currentUser.id)) || "me");
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) {}
+    const today = ymd(new Date());
+    const last = list[list.length - 1];
+    if (last && last.d === today) { last.c = c; last.g = g; } else list.push({ d: today, c, g });
+    list = list.slice(-400);
+    try { localStorage.setItem(key, JSON.stringify(list)); } catch (e) {}
+    return list;
+  }
+  function chartSvg(list) {
+    const W = 600, H = 250, L = 44, R = 14, T = 12, B = 30;
+    const end = new Date(); end.setHours(12, 0, 0, 0);
+    const start = new Date(end); start.setDate(end.getDate() - progRange);
+    const x = (d) => L + ((parseD(d) - start) / (end - start || 1)) * (W - L - R);
+    const y = (v) => T + (1 - v / 100) * (H - T - B);
+    const pts = list.filter((p) => parseD(p.d) >= start);
+    const grid = [0, 25, 50, 75, 100].map((v) => `<line class="gl" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="gt" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v}%</text>`).join("");
+    const xl = [0, 1, 2, 3, 4].map((i) => { const d = new Date(start.getTime() + ((end - start) * i) / 4); return `<text class="gt" x="${L + ((W - L - R) * i) / 4}" y="${H - 8}" text-anchor="${i === 4 ? "end" : "middle"}">${d.toLocaleString("en-US", progRange > 60 ? { month: "short" } : { month: "short", day: "numeric" })}</text>`; }).join("");
+    const line = (key, cls) => {
+      if (!pts.length) return "";
+      const P = pts.map((p) => [x(p.d), y(p[key])]);
+      if (P.length === 1) return `<circle class="dot ${cls}" cx="${P[0][0]}" cy="${P[0][1]}" r="5"/>`;
+      let d = `M${P[0][0]} ${P[0][1]}`;
+      for (let i = 1; i < P.length; i++) { const mx = (P[i - 1][0] + P[i][0]) / 2; d += ` C${mx} ${P[i - 1][1]} ${mx} ${P[i][1]} ${P[i][0]} ${P[i][1]}`; }
+      const area = `${d} L${P[P.length - 1][0]} ${y(0)} L${P[0][0]} ${y(0)} Z`;
+      return `<path class="area ${cls}" d="${area}"/><path class="ln ${cls}" d="${d}"/><circle class="dot ${cls}" cx="${P[P.length - 1][0]}" cy="${P[P.length - 1][1]}" r="4.5"/>`;
+    };
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Course and goals progress over time">${grid}${xl}${line("c", "c1")}${line("g", "c2")}</svg>`;
+  }
+  const YEAR_DESC = { 9: "Build a strong foundation and explore your interests.", 10: "Explore majors and gain real-world experience.", 11: "Narrow your focus and build your resume.", 12: "Apply, get accepted, and plan for your future." };
+  const YEAR_ICON = [["cap", "y1"], ["doc", "y2"], ["user", "y3"], ["star", "y4"]];
+
   dashboardPage = function () {
     const p = state.profile;
     const pr = pathProgress();
     const cap = (n, max) => Math.min(100, Math.round((n / max) * 100));
-    const gpaNum = parseFloat(p.gpa);
-    const savedColleges = arr(state.savedColleges).length;
+    const grade = Number(p.grade) || 9;
+    const courses = arr(p.courses).map((c) => norm(c, false));
+    const nCourses = courses.length + arr(p.planned).length;
+    const doneCourses = courses.filter((c) => Number(c.year) && Number(c.year) < grade).length;
+    const coursePct = nCourses ? Math.round((doneCourses / nCourses) * 100) : 0;
+    const yearsDone = pr.years.filter((y) => y.items.every((_, i) => pr.done.includes(`${y.grade}-${i}`))).length;
+    const roadPct = Math.round((yearsDone / 4) * 100);
+    const gpa = parseFloat(p.gpa);
+    const goalPct = Math.round(((isNaN(gpa) ? 0 : cap(gpa, 3.8)) + cap(arr(state.savedColleges).length, 5) + cap(arr(p.internships).length, 2) + cap(arr(state.applications).length, 5)) / 4);
+    const nSch = arr(opportunities).filter((o) => /scholar/i.test(o.category || "")).length;
+    const today = new Date();
+    const in30 = ymd(new Date(today.getTime() + 30 * 864e5));
+    const nDue = calEvents().filter((e) => e.d >= ymd(today) && e.d <= in30).length;
+    const hist = recordProgress(coursePct, goalPct);
 
-    const ring = (label, pct, big, small, cls) =>
-      `<div class="pw-ringbox"><div class="pw-ring ${cls}" style="--pct:${Math.max(0, Math.min(100, pct))}"><b>${big}</b></div><strong>${label}</strong><small>${small}</small></div>`;
-    const nAct = arr(p.activities).length;
-    const nApp = arr(state.applications).length;
-    const statHtml = [
-      ring("Roadmap", pr.pct, `${pr.finished}/${pr.total}`, "steps done", "r-teal"),
-      ring("Activities", cap(nAct, 4), nAct, "listed", "r-orange"),
-      ring("Colleges", cap(savedColleges, 6), savedColleges, "saved", "r-blue"),
-      ring("Applications", cap(nApp, 5), nApp, "tracked", "r-purple"),
+    const stat = (cls, ic, name, big, sub, pill, bar, page) =>
+      `<button class="dash-stat" data-page="${page}"><span class="dash-stat-top"><span class="dash-ico ${cls}">${I[ic]}</span><b>${name}</b></span><span class="dash-big">${big}${pill ? `<em class="dash-pill ${cls}">${pill}</em>` : ""}</span><small>${sub}</small>${bar !== null ? `<span class="dash-bar"><i class="${cls}" style="width:${bar}%"></i></span>` : `<span class="dash-go">${I.chev}</span>`}</button>`;
+    const stats = [
+      stat("s1", "book", "Course Progress", `${doneCourses} / ${nCourses}`, "courses completed", `${coursePct}%`, coursePct, "courses"),
+      stat("s2", "target", "Roadmap Milestones", `${yearsDone} / 4`, "completed", `${roadPct}%`, roadPct, "roadmap"),
+      stat("s3", "cap", "Scholarships", nSch, "matched for you", "", null, "deadlines"),
+      stat("s4", "cal", "Upcoming Deadlines", nDue, "in the next 30 days", "", null, "calendar"),
     ].join("");
 
-    const quick = [
-      ["route", "c-blue", "My Roadmap", "Your step-by-step path", "roadmap"],
-      ["trophy", "c-green", "Opportunities", "Programs and competitions", "opportunities"],
-      ["star", "c-violet", "Activities", "Get involved and build up", "activities"],
-      ["brief", "c-orange", "Careers", "Explore what fits you", "careers"],
-      ["doc", "c-pink", "Applications", "Manage your applications", "applications"],
-      ["cap", "c-purple", "College Planning", "Plan your future step by step", "colleges"],
-    ]
-      .map(
-        (q) =>
-          `<button class="pw-quick ${q[1]}" data-page="${q[4]}"><span class="pw-quick-ico">${I[q[0]]}</span><span class="pw-quick-copy"><b>${q[2]}</b><small>${q[3]}</small></span></button>`,
-      )
-      .join("");
+    const ranges = [[30, "1M"], [90, "3M"], [180, "6M"], [365, "1Y"]];
+    const chart = `<section class="dash-card dash-chart"><div class="dash-head"><h2><span class="dash-h-ico">${I.route}</span>Your Progress</h2><div class="dash-range" role="group" aria-label="Time range">${ranges.map(([d, l]) => `<button data-prog-range="${d}" aria-pressed="${progRange === d}">${l}</button>`).join("")}</div></div>
+      <div class="dash-chart-body"><div class="dash-svg">${chartSvg(hist)}</div><div class="dash-note"><strong><i></i>${coursePct || roadPct ? "You're on track!" : "Let's get started"}</strong><p>${nCourses ? `You've completed ${coursePct}% of your courses and ${roadPct}% of your roadmap milestones.` : `Add your courses and check off roadmap steps to see your progress here.`}</p><div class="dash-keep"><span>${I.target}</span><div><b>Keep going!</b><small>Small steps create big results.</small></div></div></div></div>
+      <div class="dash-legend"><span><i class="c1"></i>Course Progress</span><span><i class="c2"></i>Goals Progress</span>${hist.length < 2 ? '<small>History builds up as you use the app.</small>' : ""}</div></section>`;
 
-    /* the next few steps, shown as a small path */
-    const flat = [];
-    pr.years.forEach((y) => y.items.forEach((title, i) => flat.push({ id: `${y.grade}-${i}`, title, year: y.name, grade: y.grade })));
-    const startAt = Math.max(0, flat.findIndex((s) => pr.current && s.id === pr.current.id));
-    const upcoming = flat.slice(startAt).filter((s) => !pr.done.includes(s.id)).slice(0, 4);
-    const pathRows = upcoming.length
-      ? upcoming
-          .map((s, i) => {
-            const now = i === 0;
-            return `<button class="pw-step${now ? " now" : ""}" data-page="roadmap"><span class="pw-step-dot">${now ? I.star : i + 1}</span><span class="pw-step-copy"><b>${esc(s.title)}</b><small>${s.year} year</small></span>${now ? '<span class="pw-pill now">Start</span>' : ""}</button>`;
-          })
-          .join("")
-      : `<div class="empty-state"><strong>Every step is done.</strong>Nice work. Your roadmap is complete.</div>`;
-
-    const tasks = arr(state.tasks)
-      .filter((t) => !t.done)
-      .sort((a, b) => (a.due || "9999").localeCompare(b.due || "9999"))
-      .slice(0, 4);
-    const taskRows = tasks.length
-      ? tasks
-          .map((t) => {
-            const d = t.due ? new Date(`${t.due}T12:00:00`) : null;
-            const mon = d ? d.toLocaleString("en-US", { month: "short" }).toUpperCase() : "OPEN";
-            return `<div class="pw-row"><div class="pw-date"><small>${mon}</small><b>${d ? d.getDate() : "—"}</b></div><div class="grow"><strong>${esc(t.title)}</strong><span>${t.due ? dateLabel(t.due) : "No deadline set"}</span></div>${t.category ? `<span class="pw-pill">${esc(t.category)}</span>` : ""}</div>`;
-          })
-          .join("")
-      : `<div class="empty-state"><strong>A clear calendar.</strong>Add a task or deadline when you're ready.</div>`;
-
-    const timeline = [...pr.years.map((y) => [y.grade, `${y.name} year`, y.hint]), [13, "College", "Your next chapter"]]
-      .map(([g, t, s]) => {
-        const cls = g < pr.grade ? "done" : g === pr.grade ? "now" : "";
-        return `<div class="pw-t ${cls}"><div class="pw-dot"></div><div><strong>${t}</strong><span>${s}</span></div>${cls === "done" ? `<div class="ok">${I.check}</div>` : ""}</div>`;
+    const road = `<section class="dash-card dash-road"><div class="dash-head"><h2><span class="dash-h-ico">${I.cap}</span>College Roadmap</h2><a href="#roadmap" data-page="roadmap">View Full Roadmap ${I.chev}</a></div><div class="dash-years">${pr.years
+      .map((y, k) => {
+        const [ic, c] = YEAR_ICON[k];
+        const two = y.items.slice(0, 2).map((t, i) => { const d = pr.done.includes(`${y.grade}-${i}`); return `<li class="${d ? "done" : ""}"><span>${d ? I.check : ""}</span>${esc(t)}</li>`; }).join("");
+        return `<div class="dash-year"><span class="dash-node ${c}">${I[ic]}</span><b>${y.name}</b><p>${YEAR_DESC[y.grade]}</p><ul>${two}</ul></div>`;
       })
-      .join("");
+      .join("")}</div></section>`;
 
-    const recoIcons = ["cap", "trophy", "star", "doc"];
-    const recoColors = ["c-blue", "c-orange", "c-purple", "c-teal"];
-    const reco = arr(opportunities)
-      .slice(0, 4)
-      .map(
-        (o, i) =>
-          `<button class="pw-card" data-page="opportunities"><span class="pw-ico ${recoColors[i % 4]}">${I[recoIcons[i % 4]]}</span><strong>${esc(o.name)}</strong><span class="meta">${esc(o.category || "")}${o.deadline ? " · " + esc(o.deadline) : ""}</span><span class="more">Learn more ${I.arrow}</span></button>`,
-      )
-      .join("");
+    const prompts = [["sparkles", "Help me choose the best colleges for my major"], ["book", "Create a study plan for my upcoming exams"], ["target", "Suggest scholarships I might be eligible for"], ["brief", "Explore career options based on my interests"]];
+    const ai = `<aside class="dash-card dash-ai"><div class="dash-ai-head"><span class="dash-bot">${I.sparkles}</span><h2>AI Study &amp; Planning Assistant</h2><em>Powered by AI</em></div><p>Get personalized advice, plan your next steps, and stay on track — all in one place.</p>${prompts.map(([ic, t]) => `<button class="dash-prompt" data-ai-prompt="${esc(t)}"><span>${I[ic]}</span>${t}<i>${I.chev}</i></button>`).join("")}<button class="dash-ask" data-page="advisor">${I.sparkles} Ask AI</button></aside>`;
 
-    const cur = pr.current;
-    return `<div class="pw-grid">
-      <div class="pw-main">
-        <div class="pw-greet"><h1>Good ${greeting()}, ${esc(p.firstName || "there")}!</h1><p>Keep going — you're closer to your goals than you think.${svFresh(p) ? ' <button class="text-link" data-pp-survey>Take the 2-minute welcome survey</button>' : ""}</p></div>
-        <div class="pw-quicks">${quick}</div>
-        <section class="pw-panel"><div class="pw-head"><h2>Your progress</h2></div><div class="pw-rings">${statHtml}</div></section>
-        <div class="pw-two">
-          <section class="pw-panel"><div class="pw-head"><h2>${I.route} Your path</h2><a href="#roadmap" data-page="roadmap">Open map</a></div><div class="pw-steps">${pathRows}</div></section>
-          <section class="pw-panel"><div class="pw-head"><h2>${I.cal} Next up</h2><button data-action="add-task">+ Add</button></div>${taskRows}</section>
-        </div>
-        <section class="pw-panel pw-tip"><div class="pw-head"><h2>${I.sparkles} Quick tip</h2></div><p>${cur ? "Small steps add up. Finish just one roadmap step today and keep your streak going." : "Great work! Ask your AI coach what to explore next."}</p></section>
-        <section class="pw-panel"><div class="pw-head"><h2>${I.sparkles} Recommended for you</h2><a href="#opportunities" data-page="opportunities">View all</a></div>${reco ? `<div class="pw-reco">${reco}</div>` : `<div class="empty-state"><strong>Nothing to show yet.</strong>Add interests in your profile to get ideas.</div>`}</section>
-      </div>
-      <aside class="pw-side">
-        <section class="pw-panel"><div class="pw-head"><h2>Your college roadmap</h2><a href="#roadmap" data-page="roadmap">Full plan ›</a></div><div class="pw-time">${timeline}</div></section>
-        <section class="pw-panel pw-ai"><div class="pw-head"><h2>${I.sparkles} AI assistant</h2></div>
-          <div class="bubble">What would you like to do next?</div>
-          <div class="chipcol"><button data-page="deadlines">Help me find scholarships</button><button data-page="roadmap">Review my roadmap</button><button data-page="essays">Improve my essay draft</button></div>
-          <button class="pw-ask" data-page="advisor"><span>Ask me anything…</span>${I.send}</button>
-        </section>
-      </aside>
+    return `<div class="dash">
+      <div class="dash-title"><h1>Welcome back, ${esc(p.firstName || "there")}</h1><p>Your next step starts here.${svFresh(p) ? ' <button class="text-link" data-pp-survey>Take the 2-minute welcome survey</button>' : ""}</p></div>
+      <div class="dash-stats">${stats}</div>
+      <div class="dash-cols"><div class="dash-left">${pref("tips") ? chart : ""}${road}</div>${pref("recs") ? ai : ""}</div>
     </div>`;
   };
+  document.addEventListener("click", (e) => {
+    const r = e.target.closest("[data-prog-range]");
+    if (r) { progRange = Number(r.dataset.progRange); render(); }
+    const a = e.target.closest("[data-ai-prompt]");
+    if (a) {
+      nav("advisor");
+      const box = document.getElementById("chatInput");
+      if (box) { box.value = a.dataset.aiPrompt; sendChat(); }
+    }
+  });
 
   /* ================================================================
      7. ROADMAP  (Duolingo-style path)
@@ -804,12 +856,198 @@
   if (modalBox && window.MutationObserver) new MutationObserver(() => segSelects(modalBox)).observe(modalBox, { childList: true });
 
   /* ================================================================
+     MOCKUP PAGES: Goals, Applications, Calendar, Resources, planning banner
+     ================================================================ */
+  const cols5 = ["c-blue", "c-teal", "c-purple", "c-orange", "c-pink"];
+  const bar = (pct, cls) => `<div class="pw-bar"><i class="${cls || "c-blue"}" style="width:${Math.max(0, Math.min(100, pct))}%"></i></div>`;
+  const ringHtml = (label, pct, big, small, cls) =>
+    `<div class="pw-ringbox"><div class="pw-ring ${cls}" style="--pct:${Math.max(0, Math.min(100, pct))}"><b>${big}</b></div><strong>${label}</strong><small>${small}</small></div>`;
+  const pctOf = (n, max) => Math.min(100, Math.round((n / max) * 100));
+
+  /* Goals (progress comes from what the student has entered) */
+  function goalsPage() {
+    const p = state.profile;
+    const pr = pathProgress();
+    const gpa = parseFloat(p.gpa);
+    const nInt = arr(p.internships).length;
+    const nApp = arr(state.applications).length;
+    const nCol = arr(state.savedColleges).length;
+    const goals = [
+      ["target", "c-blue", "Raise my GPA to a 3.8+", "Academic", isNaN(gpa) ? 0 : pctOf(gpa, 3.8), isNaN(gpa) ? "Add your GPA in your profile" : `Currently ${p.gpa}`],
+      ["cap", "c-teal", "Save 5 colleges I like", "College", pctOf(nCol, 5), `${nCol} of 5 saved`],
+      ["brief", "c-orange", "Complete 2 internships", "Career", pctOf(nInt, 2), `${nInt} of 2 listed`],
+      ["doc", "c-pink", "Apply to 5 colleges", "College / Application", pctOf(nApp, 5), `${nApp} of 5 tracked`],
+    ];
+    return `${pageHeader("TRACK YOUR PROGRESS", "My goals", "Track your progress and stay motivated.", `<button class="btn btn-primary" data-page="advisor">${I.sparkles} Plan with your coach</button>`)}
+    <section class="pw-panel"><div class="pw-rings">${ringHtml("Roadmap", pr.pct, `${pr.finished}/${pr.total}`, "Academic", "r-blue")}${ringHtml("Colleges", pctOf(nCol, 5), `${nCol}/5`, "College", "r-teal")}${ringHtml("Internships", pctOf(nInt, 2), `${nInt}/2`, "Career", "r-orange")}${ringHtml("Applications", pctOf(nApp, 5), `${nApp}/5`, "Personal", "r-purple")}</div></section>
+    <section class="pw-panel" style="margin-top:18px"><div class="pw-head"><h2>Goal progress</h2></div>${goals
+      .map(([ic, c, t, s, pct, note]) => `<div class="goal-row"><span class="pw-ico ${c}">${I[ic]}</span><div class="goal-main"><strong>${t}</strong><span>${s} · ${note}</span></div>${bar(pct, c)}<b class="app-pct">${pct}%</b></div>`)
+      .join("")}</section>`;
+  }
+
+  /* Applications */
+  let appFilter = "All";
+  const APP_PCT = { "Not Started": 0, "In Progress": 50, Submitted: 85, Complete: 100 };
+  applicationsPage = function () {
+    const all = arr(state.applications);
+    const items = all.filter((a) => appFilter === "All" || a.status === appFilter);
+    const tabs = ["All", "In Progress", "Submitted", "Not Started", "Complete"]
+      .map((f) => `<button class="filter-tab ${appFilter === f ? "active" : ""}" data-app-filter="${f}">${f}</button>`)
+      .join("");
+    const rows = items
+      .map((a, i) => {
+        const pct = APP_PCT[a.status] ?? 0;
+        return `<div class="app-row"><span class="pw-ico ${cols5[i % 5]}">${esc((a.college_name || "?").trim().slice(0, 2).toUpperCase())}</span><div class="app-main"><strong>${esc(a.college_name)}</strong><span>${a.due ? `Due ${esc(a.due)} · ` : ""}${esc(a.notes || "Essays, recommendations, transcript and financial aid")}</span></div><div class="app-prog">${bar(pct, "c-blue")}</div><b class="app-pct">${pct}%</b><select class="select-input" data-app-status="${esc(a.id)}" aria-label="Status">${["Not Started", "In Progress", "Submitted", "Complete"].map((s) => `<option ${s === a.status ? "selected" : ""}>${s}</option>`).join("")}</select><button class="course-remove" data-action="delete-application" data-id="${esc(a.id)}" aria-label="Delete">×</button></div>`;
+      })
+      .join("");
+    return `${pageHeader("KEEP EACH APPLICATION ORGANIZED", "My applications", "Track your college and scholarship applications.", `<button class="btn btn-primary" data-action="new-application">＋ Add application</button>`)}<div class="filter-tabs" style="margin-bottom:16px">${tabs}</div><div class="panel">${rows || `<div class="empty-state"><strong>${all.length ? "Nothing in this filter." : "No applications tracked yet."}</strong>${all.length ? "Try another tab." : "Add a college to record deadlines and what is left to prepare."}</div>`}</div>`;
+  };
+
+  /* Courses (uses the existing add-course / remove-course actions and profile data) */
+  let courseTab = "All";
+  const norm = (c, planned) => ({ ...(typeof c === "string" ? { name: c } : c), planned });
+  function coursesPage() {
+    const p = state.profile;
+    const all = [...arr(p.courses).map((c) => norm(c, false)), ...arr(p.planned).map((c) => norm(c, true))];
+    const tabs = ["All", "9", "10", "11", "12", "Planned"];
+    const list = all.filter((c) => courseTab === "All" || (courseTab === "Planned" ? c.planned : String(c.year) === courseTab && !c.planned));
+    const cur = all.filter((c) => !c.planned && String(c.year) === String(p.grade)).length;
+    const rows = list
+      .map((c, i) => `<div class="app-row"><span class="pw-ico ${cols5[i % 5]}">${esc((c.name || "?").trim().slice(0, 2).toUpperCase())}</span><div class="app-main"><strong>${esc(c.name)}</strong><span>${esc(c.level || "Standard")}${c.year ? ` · Grade ${esc(c.year)}` : ""}${c.credits ? ` · ${esc(c.credits)} credits` : ""}${c.prereq ? ` · Prereq: ${esc(c.prereq)}` : ""}</span></div><span class="tag ${c.planned ? "amber" : "green"}">${c.planned ? "Planned" : "Current"}</span><button class="course-remove" data-action="remove-course" data-name="${esc(c.name)}" data-year="${esc(c.year || "")}" data-planned="${c.planned}" aria-label="Remove ${esc(c.name)}">×</button></div>`)
+      .join("");
+    return `${pageHeader("BUILD YOUR ACADEMIC PLAN", "Courses", "Track your current classes and plan what comes next. Confirm choices with your counselor.", `<button class="btn btn-primary" data-action="add-course">＋ Add course</button>`)}
+    <div class="stat-row"><div class="stat-card"><div class="stat-kicker">Total courses</div><div class="stat-value">${all.length}</div><div class="stat-help">current and planned</div></div><div class="stat-card"><div class="stat-kicker">This year</div><div class="stat-value">${cur}</div><div class="stat-help">grade ${esc(p.grade || "—")}</div></div><div class="stat-card"><div class="stat-kicker">Planned</div><div class="stat-value">${all.filter((c) => c.planned).length}</div><div class="stat-help">to discuss with a counselor</div></div></div>
+    <div class="filter-tabs" style="margin-bottom:16px">${tabs.map((t) => `<button class="filter-tab ${courseTab === t ? "active" : ""}" data-course-tab="${t}">${/^\d+$/.test(t) ? t + "th grade" : t}</button>`).join("")}</div>
+    <div class="panel">${rows || `<div class="empty-state"><strong>No courses here yet.</strong>Use “Add course” to record a class or one you are considering.</div>`}</div>`;
+  }
+
+  /* Calendar: month / week / day, selectable days, upcoming events */
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const parseD = (s) => new Date(`${s}T12:00:00`);
+  let calView = "month";
+  let calSel = ymd(new Date());
+  function calEvents() {
+    const ev = [];
+    arr(state.tasks).filter((t) => t.due && !t.done).forEach((t) => ev.push({ d: t.due, title: t.title, sub: t.category || "Task" }));
+    arr(state.applications).forEach((a) => /^\d{4}-\d{2}-\d{2}$/.test(a.due || "") && ev.push({ d: a.due, title: `${a.college_name} application`, sub: a.status || "Application" }));
+    return ev.sort((a, b) => a.d.localeCompare(b.d));
+  }
+  const evRowHtml = (e) => { const d = parseD(e.d); return `<div class="pw-row"><div class="pw-date"><small>${d.toLocaleString("en-US", { month: "short" }).toUpperCase()}</small><b>${d.getDate()}</b></div><div class="grow"><strong>${esc(e.title)}</strong><span>${esc(e.sub)}</span></div></div>`; };
+  function calendarPage() {
+    const sel = parseD(calSel);
+    const y = sel.getFullYear();
+    const m = sel.getMonth();
+    const ev = calEvents();
+    const todayKey = ymd(new Date());
+    let body = "";
+    let title = sel.toLocaleString("en-US", { month: "long", year: "numeric" });
+    if (calView === "month") {
+      const lead = new Date(y, m, 1).getDay();
+      const days = new Date(y, m + 1, 0).getDate();
+      const cells = [...Array(lead).fill('<div class="cal-d empty"></div>')];
+      for (let d = 1; d <= days; d++) {
+        const k = ymd(new Date(y, m, d));
+        cells.push(`<button class="cal-d${k === todayKey ? " today" : ""}${k === calSel ? " sel" : ""}" data-cal-day="${k}" aria-label="${k}${ev.some((e) => e.d === k) ? ", has events" : ""}">${d}${ev.some((e) => e.d === k) ? "<i></i>" : ""}</button>`);
+      }
+      body = `<div class="cal-grid">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => `<div class="cal-h">${d}</div>`).join("")}${cells.join("")}</div>`;
+    } else if (calView === "week") {
+      const start = new Date(sel); start.setDate(sel.getDate() - sel.getDay());
+      const cols = [...Array(7)].map((_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); const k = ymd(d); const es = ev.filter((e) => e.d === k); return `<div class="cal-wk${k === todayKey ? " today" : ""}"><button data-cal-day="${k}" class="cal-wk-h${k === calSel ? " sel" : ""}"><small>${d.toLocaleString("en-US", { weekday: "short" })}</small><b>${d.getDate()}</b></button>${es.map((e) => `<div class="cal-chip">${esc(e.title)}</div>`).join("") || '<span class="cal-none">—</span>'}</div>`; });
+      body = `<div class="cal-week">${cols.join("")}</div>`;
+      title = `Week of ${start.toLocaleString("en-US", { month: "short", day: "numeric" })}`;
+    } else {
+      const es = ev.filter((e) => e.d === calSel);
+      body = es.length ? es.map(evRowHtml).join("") : '<div class="empty-state"><strong>Nothing scheduled.</strong>Add a task with this date to see it here.</div>';
+      title = sel.toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric" });
+    }
+    const dayEv = ev.filter((e) => e.d === calSel);
+    const side = dayEv.length ? dayEv : ev.filter((e) => e.d >= todayKey).slice(0, 6);
+    const sideTitle = dayEv.length ? `Events · ${sel.toLocaleString("en-US", { month: "short", day: "numeric" })}` : "Upcoming events";
+    return `${pageHeader("SEE WHAT IS COMING", "Calendar", "Your tasks and deadlines in one place.", `<button class="btn btn-primary" data-action="add-task">＋ Add a task</button>`)}
+    <div class="grid two-col"><section class="pw-panel"><div class="cal-top"><div class="filter-tabs">${["month", "week", "day"].map((v) => `<button class="filter-tab ${calView === v ? "active" : ""}" data-cal-view="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}</div><div class="cal-head"><button class="icon-btn" data-cal="-1" aria-label="Previous">‹</button><h2>${title}</h2><button class="icon-btn" data-cal="1" aria-label="Next">›</button></div><button class="btn btn-quiet btn-sm" data-cal-today>Today</button></div>${body}</section>
+    <section class="pw-panel"><div class="pw-head"><h2>${sideTitle}</h2></div>${side.length ? side.map(evRowHtml).join("") : '<div class="empty-state"><strong>Nothing coming up.</strong>Tasks and application deadlines with dates show here.</div>'}</section></div>`;
+  }
+  document.addEventListener("click", (e) => {
+    const t = e.target;
+    const c = t.closest("[data-cal]");
+    if (c) {
+      const n = Number(c.dataset.cal);
+      const d = parseD(calSel);
+      if (calView === "month") d.setMonth(d.getMonth() + n, 1);
+      else d.setDate(d.getDate() + n * (calView === "week" ? 7 : 1));
+      calSel = ymd(d);
+      return render();
+    }
+    let x;
+    if ((x = t.closest("[data-cal-day]"))) { calSel = x.dataset.calDay; return render(); }
+    if ((x = t.closest("[data-cal-view]"))) { calView = x.dataset.calView; return render(); }
+    if (t.closest("[data-cal-today]")) { calSel = ymd(new Date()); return render(); }
+    if ((x = t.closest("[data-app-filter]"))) { appFilter = x.dataset.appFilter; return render(); }
+    if ((x = t.closest("[data-course-tab]"))) { courseTab = x.dataset.courseTab; return render(); }
+  });
+
+  /* Resources */
+  function resourcesPage() {
+    const tiles = [
+      ["cap", "c-blue", "College search", "Find the right fit", "page", "colleges"],
+      ["trophy", "c-teal", "Scholarships", "Get financial help", "page", "deadlines"],
+      ["book", "c-purple", "Test prep", "Practice and improve", "page", "tutor"],
+      ["pen", "c-orange", "Essay guides", "Write a standout essay", "page", "essays"],
+      ["compass", "c-pink", "Career exploration", "Discover your path", "page", "careers"],
+      ["route", "c-blue", "Useful links", "StudentAid.gov, official aid info", "link", "https://studentaid.gov"],
+    ];
+    return `${pageHeader("TOOLS FOR YOUR JOURNEY", "Resources", "Helpful links, guides and tools for your journey.")}<div class="res-grid">${tiles
+      .map(([ic, c, t, s, kind, to]) => {
+        const inner = `<span class="pw-ico ${c}">${I[ic]}</span><span class="res-copy"><b>${t}</b><small>${s}</small></span>`;
+        return kind === "page" ? `<button class="res-tile" data-page="${to}">${inner}</button>` : `<a class="res-tile" href="${to}" target="_blank" rel="noopener">${inner}</a>`;
+      })
+      .join("")}</div>`;
+  }
+
+  const prevOpps = opportunitiesPage;
+  let oppQ = "";
+  opportunitiesPage = function () {
+    return prevOpps()
+      .replace(/>Opportunities<\/h1>/, ">Find Internships</h1>")
+      .replace("A starter collection to help you find programs, competitions, and ways to contribute.", "Discover opportunities that match your interests and goals.")
+      .replace('<div class="panel"><div class="panel-head"><div><h2 class="panel-title">Explore opportunities', `<div class="search-row"><div class="search-wrap"><input class="search-input" data-opp-search type="search" placeholder="Search internships, programs, competitions…" aria-label="Search internships" value="${esc(oppQ)}"></div></div><div class="panel"><div class="panel-head"><div><h2 class="panel-title">Explore opportunities`);
+  };
+  function applyOppFilter() {
+    const q = oppQ.trim().toLowerCase();
+    document.querySelectorAll(".resource-card").forEach((c) => { c.hidden = !!q && !c.textContent.toLowerCase().includes(q); });
+  }
+  document.addEventListener("input", (e) => {
+    if (e.target.matches("[data-opp-search]")) { oppQ = e.target.value; applyOppFilter(); }
+  });
+
+  /* Activities: show an "Active" chip like the mockup */
+  const prevActivities = activitiesPage;
+  activitiesPage = function () {
+    return prevActivities()
+      .split("<span>Part of your story</span>").join('<span class="tag green">Active</span>')
+      .replace(/<span class="tag[^"]*">Edit in profile<\/span>/g, "");
+  };
+
+  /* Roadmap: night-sky planning banner */
+  const prevRoadmap = roadmapPage;
+  roadmapPage = function () {
+    const banner = `<section class="plan-banner"><div><h1>College Planning</h1><p>Your journey to college, one step at a time!</p></div><svg viewBox="0 0 600 200" preserveAspectRatio="xMaxYMax slice" aria-hidden="true"><circle class="st" cx="60" cy="40" r="2"/><circle class="st" cx="180" cy="24" r="1.6"/><circle class="st" cx="320" cy="50" r="2"/><circle class="st" cx="470" cy="28" r="1.8"/><circle class="moon" cx="520" cy="56" r="22"/><path class="h1" d="M0 200V120l90-50 80 60 100-80 110 90 90-50 130 70v40z"/><path class="h2" d="M0 200v-50l120-40 100 50 120-60 130 70 130-40v70z"/></svg></section>`;
+    return prevRoadmap().replace(/<div class="cm-head">[\s\S]*?<\/button><\/div>(?=\s*<section class="pw-panel cm-stepper">)/, banner);
+  };
+
+  const MY_PAGES = { courses: coursesPage, goals: goalsPage, calendar: calendarPage, resources: resourcesPage };
+
+  /* ================================================================
      8. SMALL PAGE TWEAKS
      (course planning is gone from the app; saved course data in a profile is left untouched)
      ================================================================ */
   const prevProfile = profilePage;
   profilePage = function () {
-    return prevProfile().replace(
+    return prevProfile()
+      .replace("Easy on the eyes</small></span></button></div>", `Easy on the eyes</small></span></button><button type="button" class="theme-choice" data-theme-choice="system" aria-pressed="false"><span class="theme-preview sys"></span><span><strong>System</strong><br><small class="context-hint">Match my device</small></span></button></div><div class="accent-wrap"><strong>Accent color</strong><div class="accent-row">${Object.keys(ACCENTS).map((k) => `<button type="button" class="accent-dot" data-accent="${k}" style="background:${ACCENTS[k]}" aria-label="${k} accent" aria-pressed="${readAccent() === k}"></button>`).join("")}</div></div>`)
+      .replace('<form id="profileExtrasForm"', `<section class="panel"><div class="pp-toggle"><div><h2 class="panel-title">Account</h2><div class="panel-sub">Sign out of PeerPilot on this device.</div></div><button type="button" class="btn btn-danger" data-signout>Sign out</button></div></section><form id="profileExtrasForm"`)
+      .replace('<form id="profileExtrasForm"', `<section class="panel"><div class="panel-head"><div><h2 class="panel-title">Preferences</h2><div class="panel-sub">Choose what you see on Home.</div></div></div>${[["recs", "Show the AI assistant on Dashboard"], ["tips", "Show the progress chart on Dashboard"]].map(([k, l]) => `<div class="pp-toggle pref-row"><span>${l}</span><button type="button" class="pp-switch${pref(k) ? " on" : ""}" role="switch" aria-checked="${pref(k)}" aria-label="${l}" data-pref="${k}"></button></div>`).join("")}</section><form id="profileExtrasForm"`)
+      .replace(
       /<div class="field full"><label for="(?:courses|planned)Profile">[^<]*<\/label><textarea[^>]*name="(courses|planned)"[^>]*>([\s\S]*?)<\/textarea><\/div>/g,
       '<textarea name="$1" hidden>$2</textarea>',
     );
@@ -820,7 +1058,11 @@
   };
   const prevAdvisor = advisorPage;
   advisorPage = function () {
+    const tiles = [["book", "Explain a topic", "Break down a hard idea", "Explain this topic to me simply: "], ["cal", "Make a study plan", "Plan around your deadlines", "Help me make a study plan for this week."], ["pen", "Review my college essay", "Get feedback and ideas", "Give me feedback on my college essay: "], ["brief", "Find internships", "Discover opportunities", "What internships or programs fit my interests?"]]
+      .map(([ic, t, s, pr]) => `<button type="button" class="buddy-tile" data-prompt="${pr}"><span class="pw-ico c-blue">${I[ic]}</span><span class="res-copy"><b>${t}</b><small>${s}</small></span></button>`)
+      .join("");
     return prevAdvisor()
+      .replace('<div class="chat-input-area">', `<div class="buddy-tiles">${tiles}</div><div class="chat-input-area">`)
       .split("Plan next year’s courses").join("Plan my next steps")
       .split("What should I think about for next year's courses?").join("What should I focus on next to stay on track?")
       .split("Ask about courses, colleges, or what to do next…").join("Ask about colleges, activities, or what to do next…")
@@ -833,13 +1075,24 @@
      ================================================================ */
   const prevRender = render;
   render = function () {
+    if (MY_PAGES[activePage]) {
+      updateChrome();
+      document.getElementById("pageContainer").innerHTML = MY_PAGES[activePage]();
+      bindPageEvents();
+      bindExtraForms();
+      decorate();
+      return;
+    }
     prevRender();
     decorate();
   };
   const prevNav = nav;
   nav = function (page) {
-    if (page === "courses") page = "roadmap";
-    prevNav(page);
+    if (page === "courses") {
+      /* app.js still redirects "courses" to the roadmap, so open it directly */
+      activePage = "courses";
+      render();
+    } else prevNav(page);
     closeDrawer();
     window.scrollTo(0, 0);
     if (page === "roadmap")
@@ -862,7 +1115,7 @@
      ================================================================ */
   buildNav();
   bindChrome();
-  applyTheme(readTheme() || systemTheme());
+  applyTheme(readMode() === "system" ? "system" : readTheme() || systemTheme());
   if (typeof currentUser !== "undefined" && currentUser) {
     setupNav();
     updateChrome();

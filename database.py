@@ -269,6 +269,17 @@ def init_db() -> None:
     with connect() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
+        for stmt in (  # Supabase columns; ignored if they already exist
+            "ALTER TABLE users ADD COLUMN supabase_id TEXT",
+            "ALTER TABLE sessions ADD COLUMN sb_access TEXT",
+            "ALTER TABLE sessions ADD COLUMN sb_refresh TEXT",
+            "ALTER TABLE sessions ADD COLUMN sb_exp INTEGER",
+        ):
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_supabase_idx ON users(supabase_id) WHERE supabase_id IS NOT NULL")
         for slug, name, location, majors, summary, admissions, prep, aid, verified in COLLEGE_SEEDS:
             conn.execute(
                 """INSERT OR IGNORE INTO colleges

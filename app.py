@@ -21,6 +21,7 @@ from urllib.parse import unquote, urlparse
 
 import assistant
 import database
+import supabase_sync as sb
 import features
 
 ROOT = Path(__file__).resolve().parent
@@ -69,63 +70,16 @@ BLANK_PROFILE = {
 }
 
 
-BUILD = "agent build 2026-10-16"  # shown at start-up and in /api/health so you can tell which files are running
-
-
-def load_env() -> dict:
-    """Read .env into os.environ. Forgiving about common Windows mix-ups:
-    a file saved as .env.txt, a hidden byte-order mark, UTF-16 text, spaces around =,
-    'export KEY=...', quotes, trailing comments, and an empty KEY= already set on the computer.
-    Returns {"path": the file used or None, "note": a hint or ""}."""
-    info = {"path": None, "note": ""}
-    path = next((p for p in (ROOT / ".env", ROOT / ".env.txt") if p.is_file()), None)
-    if path is None:
-        return info
-    raw = path.read_bytes()
-    text = raw.decode("utf-16", errors="replace") if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else raw.decode("utf-8-sig", errors="replace")
-    info["path"] = path
-    if path.name != ".env":
-        info["note"] = f"I read {path.name}, but please rename it to exactly .env (Windows may be hiding the .txt)."
-    for row in text.splitlines():
+def load_env() -> None:
+    path = ROOT / ".env"
+    if not path.is_file():
+        return
+    for row in path.read_text(encoding="utf-8").splitlines():
         row = row.strip()
         if not row or row.startswith("#") or "=" not in row:
             continue
-        if row.lower().startswith("export "):
-            row = row[7:].lstrip()
         key, value = row.split("=", 1)
-        key, value = key.strip(), value.strip()
-        if value[:1] in {'"', "'"}:
-            end = value.find(value[0], 1)
-            value = value[1:end] if end > 0 else value[1:]
-        else:
-            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
-        if key and value and not os.environ.get(key):  # a real value already set on the computer wins
-            os.environ[key] = value
-    return info
-
-
-def report_ai_status(info: dict) -> None:
-    """Print, in plain words, whether the AI key was found (never the key itself)."""
-    print(f"Folder: {ROOT}")
-    if info["path"]:
-        print(f"Settings file: {info['path']}")
-        if info["note"]:
-            print(f"  NOTE: {info['note']}")
-    else:
-        print(f"Settings file: NOT FOUND. Make a file named exactly .env in the folder above (copy .env.example).")
-    key = assistant._api_key()
-    if not key:
-        print("AI key: NOT FOUND. Add a line like GEMINI_API_KEY=your-key to .env, save, and restart.")
-        return
-    print(f"AI key: found (ends with ...{key[-4:]})")
-    if re.search(r"\s|your-key|paste", key, re.I):
-        print("  WARNING: that key looks wrong (spaces or placeholder text). Paste only the key itself.")
-
-    def check():
-        ok, message = assistant.check_key()
-        print(("AI check: OK. " if ok else "AI check: PROBLEM. ") + message)
-
-    threading.Thread(target=check, daemon=True).start()
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 def utcnow() -> str:
@@ -241,7 +195,6 @@ def safe_profile(value) -> dict:
             "volunteer",
             "work",
             "internships",
-            
         }:
             if isinstance(raw, list):
                 result[key] = raw[:100]
@@ -377,7 +330,7 @@ class Handler(BaseHTTPRequestHandler):
                 purge_expired()
                 with database.connect() as conn:
                     row = conn.execute(
-                        """SELECT u.id,u.email,u.is_admin,u.is_active,s.token_hash
+                        """SELECT u.id,u.email,u.is_admin,u.is_active,u.supabase_id,s.token_hash,s.sb_access,s.sb_refresh,s.sb_exp
                         FROM sessions s JOIN users u ON u.id=s.user_id
                         WHERE s.token_hash=? AND s.expires_at>?""",
                         (token_hash(token), int(time.time())),
@@ -403,7 +356,6 @@ class Handler(BaseHTTPRequestHandler):
                     {
                         "ok": True,
                         "ai_configured": assistant.configured(),
-                        "build": BUILD,
                         "model": assistant.model_name(),
                         "reasoning_effort": os.environ.get("GEMINI_THINKING_LEVEL", "high"),
                     },
@@ -790,9 +742,14 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("Enter a valid email address.")
         if not password_valid(password):
             raise ValueError("Password must be between 10 and 200 characters.")
+        sbs = None
+        if sb.enabled():  # Supabase owns the real password; the local copy is unusable
+            sbs = sb.signup(email, password)
+            password = secrets.token_urlsafe(32)
         with database.connect() as conn:
             cur = conn.execute(
-                "INSERT INTO users(email,password_hash) VALUES(?,?)", (email, hash_password(password))
+                "INSERT INTO users(email,password_hash,supabase_id) VALUES(?,?,?)",
+                (email, hash_password(password), sbs["user_id"] if sbs else None),
             )
             uid = cur.lastrowid
             conn.execute(
@@ -802,7 +759,7 @@ class Handler(BaseHTTPRequestHandler):
                 "INSERT INTO legal_acceptances(user_id,terms_version,privacy_version,accepted_at,guardian_permission_confirmed) VALUES(?,?,?,?,1)",
                 (uid, TERMS_VERSION, PRIVACY_VERSION, utcnow()),
             )
-        self.create_session(uid, email, False)
+        self.create_session(uid, email, False, sbs)
 
     def login(self, data):
         global _dummy_hash
@@ -812,6 +769,26 @@ class Handler(BaseHTTPRequestHandler):
         password = data.get("password", "")
         if not isinstance(password, str):
             password = ""
+        if sb.enabled():
+            sbs = sb.login(email, password) if isinstance(password, str) and password else None
+            if not sbs:
+                return self.send_json(401, {"error": "Email or password is incorrect."})
+            with database.connect() as conn:
+                row = conn.execute("SELECT * FROM users WHERE supabase_id=?", (sbs["user_id"],)).fetchone()
+                if not row:  # first Supabase sign-in for an existing local account, or a brand-new account
+                    row = conn.execute("SELECT * FROM users WHERE email=? AND supabase_id IS NULL", (email,)).fetchone()
+                    if row:
+                        conn.execute("UPDATE users SET supabase_id=? WHERE id=?", (sbs["user_id"], row["id"]))
+                    else:
+                        cur = conn.execute(
+                            "INSERT INTO users(email,password_hash,supabase_id) VALUES(?,?,?)",
+                            (email, hash_password(secrets.token_urlsafe(32)), sbs["user_id"]),
+                        )
+                        conn.execute("INSERT INTO profiles(user_id,data_json) VALUES(?,?)", (cur.lastrowid, json.dumps(BLANK_PROFILE)))
+                        row = conn.execute("SELECT * FROM users WHERE id=?", (cur.lastrowid,)).fetchone()
+            if not row["is_active"]:
+                return self.send_json(401, {"error": "Email or password is incorrect."})
+            return self.create_session(row["id"], row["email"], bool(row["is_admin"]), sbs)
         with database.connect() as conn:
             row = conn.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
         if not row:  # spend the same hashing time so response timing does not reveal which emails exist
@@ -822,17 +799,110 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(401, {"error": "Email or password is incorrect."})
         self.create_session(row["id"], row["email"], bool(row["is_admin"]))
 
-    def create_session(self, uid, email, is_admin):
+    def create_session(self, uid, email, is_admin, sbs=None):
         token = secrets.token_urlsafe(32)
         with database.connect() as conn:
             conn.execute(
-                "INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)",
-                (token_hash(token), uid, int(time.time()) + SESSION_SECONDS),
+                "INSERT INTO sessions(token_hash,user_id,expires_at,sb_access,sb_refresh,sb_exp) VALUES(?,?,?,?,?,?)",
+                (token_hash(token), uid, int(time.time()) + SESSION_SECONDS,
+                 sbs and sbs["access"], sbs and sbs["refresh"], sbs and sbs["exp"]),
             )
+        if sbs:
+            self.sb_safe(self.sb_hydrate, uid, sbs)
         self.send_json(200, {"user": {"id": uid, "email": email, "is_admin": is_admin}}, token)
+
+    # ---- Supabase sync (best effort: the app keeps working from SQLite if Supabase is unreachable) ----
+    def sb_safe(self, fn, *args):
+        try:
+            fn(*args)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Supabase sync skipped: {exc}")
+
+    def sb_bg(self, fn, *args):
+        threading.Thread(target=self.sb_safe, args=(fn, *args), daemon=True).start()
+
+    def sb_token(self, user):
+        """Current Supabase access token for this session, refreshed when close to expiry."""
+        if not (user and sb.enabled() and user["sb_access"]):
+            return None
+        if (user["sb_exp"] or 0) > time.time() + 60:
+            return user["sb_access"]
+        new = sb.refresh(user["sb_refresh"] or "")
+        if not new:
+            return None
+        with database.connect() as conn:
+            conn.execute(
+                "UPDATE sessions SET sb_access=?,sb_refresh=?,sb_exp=? WHERE token_hash=?",
+                (new["access"], new["refresh"], new["exp"], user["token_hash"]),
+            )
+        return new["access"]
+
+    def sb_snapshot(self, uid):
+        with database.connect() as conn:
+            p = conn.execute("SELECT data_json FROM profiles WHERE user_id=?", (uid,)).fetchone()
+            s = conn.execute("SELECT state_json FROM user_state WHERE user_id=?", (uid,)).fetchone()
+        prefs = database.json_load(s["state_json"], {}) if s else {}
+        return database.json_load(p["data_json"], {}) if p else {}, prefs.get("completedRoadmap", [])
+
+    def sb_hydrate(self, uid, sbs):
+        """On sign-in: Supabase is the source of truth. If it has no data yet, upload what exists locally."""
+        remote = sb.pull_state(sbs["access"])
+        if not remote:
+            profile, done = self.sb_snapshot(uid)
+            return sb.push_state(sbs["access"], sbs["user_id"], profile, done)
+        with database.connect() as conn:
+            conn.execute(
+                "INSERT INTO profiles(user_id,data_json) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET data_json=excluded.data_json",
+                (uid, json.dumps(safe_profile(remote["profile"]), ensure_ascii=False)),
+            )
+            s = conn.execute("SELECT state_json FROM user_state WHERE user_id=?", (uid,)).fetchone()
+            prefs = database.json_load(s["state_json"], {}) if s else {}
+            prefs["completedRoadmap"] = str_list(remote["completed"], 100, 80)
+            conn.execute(
+                "INSERT INTO user_state(user_id,state_json) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET state_json=excluded.state_json",
+                (uid, json.dumps(prefs)),
+            )
+            if not conn.execute("SELECT 1 FROM conversations WHERE user_id=?", (uid,)).fetchone():
+                msgs = sb.pull_messages(sbs["access"])
+                if msgs:
+                    cid = self.conversation_id(conn, uid)
+                    conn.executemany(
+                        "INSERT INTO messages(conversation_id,role,content,citations_json) VALUES(?,?,?,?)",
+                        [(cid, m["role"], m["content"], json.dumps(m.get("citations") or [])) for m in msgs],
+                    )
+
+    def save_state(self, user, data):
+        result = self.save_state_local(user, data)
+        tok = self.sb_token(user)
+        if tok and ("profile" in data or "completedRoadmap" in data):
+            profile, done = self.sb_snapshot(user["id"])
+            self.sb_bg(sb.push_state, tok, user["supabase_id"], profile, done)
+        return result
+
+    def append_messages(self, conn, uid, messages):
+        self.append_messages_local(conn, uid, messages)
+        user = self.user(False)
+        tok = self.sb_token(user)
+        if tok:
+            rows = [
+                {
+                    "role": m["role"],
+                    "content": str(m["text"])[:8000],
+                    "citations": [
+                        {k: str(s.get(k, ""))[:1000] for k in ("title", "url", "accessed_at")}
+                        for s in as_list(m.get("citations"), 12)
+                        if isinstance(s, dict) and str(s.get("url", "")).startswith("https://")
+                    ],
+                }
+                for m in messages
+            ]
+            self.sb_bg(sb.push_messages, tok, user["supabase_id"], rows)
 
     def logout(self):
         user = self.user(False)
+        tok = self.sb_token(user) if user else None
+        if tok:
+            self.sb_bg(sb.logout, tok)
         if user:
             with database.connect() as conn:
                 conn.execute("DELETE FROM sessions WHERE token_hash=?", (user["token_hash"],))
@@ -840,6 +910,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def reset_request(self, data):
         email = str(data.get("email", "")).strip().lower()
+        if sb.enabled():  # Supabase emails the reset link
+            self.sb_bg(sb.recover, email)
+            return self.send_json(200, {"message": "If the account exists, a reset link has been emailed."})
         with database.connect() as conn:
             user = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
         # Email delivery is intentionally not simulated. Dev mode shows a single-use reset code.
@@ -875,7 +948,7 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute("DELETE FROM sessions WHERE user_id=?", (row["user_id"],))
         self.send_json(200, {"ok": True, "message": "Password reset. Sign in with your new password."})
 
-    def save_state(self, user, data):
+    def save_state_local(self, user, data):
         """Persist planner state. Chat history is server-owned (see ai_request) and ignored here."""
         uid = user["id"]
         with database.connect() as conn:
@@ -1000,7 +1073,7 @@ class Handler(BaseHTTPRequestHandler):
         ).fetchall()
         return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
 
-    def append_messages(self, conn, uid, messages: list[dict]) -> None:
+    def append_messages_local(self, conn, uid, messages: list[dict]) -> None:
         cid = self.conversation_id(conn, uid)
         conn.executemany(
             "INSERT INTO messages(conversation_id,role,content,citations_json) VALUES(?,?,?,?)",
@@ -1213,6 +1286,15 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def delete_account(self, user, data):
+        if sb.enabled() and user["supabase_id"]:
+            sbs = sb.login(user["email"], str(data.get("password", "")))
+            if not sbs:
+                raise PermissionError("Password is incorrect.")
+            sb.delete_all(sbs["access"], sbs["user_id"])
+            sb.delete_auth_user(sbs["user_id"])  # needs SUPABASE_SERVICE_ROLE_KEY; otherwise only the data is removed
+            with database.connect() as conn:
+                conn.execute("DELETE FROM users WHERE id=?", (user["id"],))
+            return self.send_json(200, {"ok": True}, clear_cookie=True)
         with database.connect() as conn:
             row = conn.execute("SELECT password_hash FROM users WHERE id=?", (user["id"],)).fetchone()
         if not row or not check_password(str(data.get("password", "")), row["password_hash"]):
@@ -1502,7 +1584,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    env_info = load_env()
+    load_env()
     database.DB_PATH = Path(
         os.environ.get("APP_DATABASE", database.ROOT / "student_guidance.sqlite3")
     ).resolve()
@@ -1514,8 +1596,10 @@ def main() -> None:
     port = int(os.environ.get("APP_PORT", "8000"))
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
-    print(f"PeerPilot AI ({BUILD}) at http://{host}:{port}")
-    report_ai_status(env_info)
+    print(f"PeerPilot AI at http://{host}:{port}")
+    print(
+        f"AI: {'configured (Gemini)' if assistant.configured() else 'local planner mode (set GEMINI_API_KEY to enable AI/research)'}"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
